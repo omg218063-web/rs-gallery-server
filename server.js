@@ -23,15 +23,23 @@ app.post('/api/visit', w(async (req, res) => {
   res.json({ ok: 1 });
 }));
 app.post('/api/orders', w(async (req, res) => {
-  const b = req.body;
-  if (!b.pid || !b.name || !b.ph || !b.a || !b.bk || !b.trx) return res.status(400).json({ error: 'Missing fields' });
-  const p = await Product.findById(b.pid).lean();
-  if (!p) return res.status(404).json({ error: 'Product not found' });
-  const c = await cfg(), q = Math.max(1, Math.min(+b.qty || 1, 20)), inside = b.z === 'in';
+  const b = req.body, its = Array.isArray(b.items) ? b.items.slice(0, 20) : [];
+  if (!its.length || !b.name || !b.ph || !b.a || !b.bk || !b.trx) return res.status(400).json({ error: 'Missing fields' });
+  const c = await cfg(), inside = b.z === 'in', del = inside ? +(c.in || 60) : +(c.out || 120);
+  let items = [], price = 0, prepaid = 0;
+  for (const it of its) {
+    const p = await Product.findById(it.pid).lean();
+    if (!p) continue;
+    const q = Math.max(1, Math.min(+it.qty || 1, 20)), amt = p.p * q;
+    items.push({ pid: it.pid, name: p.n, qty: q, size: it.size || '', color: it.color || '', amt, cod: p.cod !== false });
+    price += amt;
+    if (p.cod === false) prepaid += amt;
+  }
+  if (!items.length) return res.status(404).json({ error: 'Products not found' });
   const o = await Order.create({
-    item: p.n, pid: b.pid, qty: q, size: b.size || '', color: b.color || '', price: p.p * q,
-    name: b.name, ph: b.ph, a: b.a, z: inside ? 'Inside Dhaka' : 'Outside Dhaka',
-    adv: inside ? +(c.in || 60) : +(c.out || 120), bk: b.bk, trx: b.trx, st: 'New'
+    items, price, delivery: del, adv: del + prepaid, due: price - prepaid,
+    item: items.map(i => i.name + (i.size || i.color ? ' (' + [i.size, i.color].filter(Boolean).join('/') + ')' : '') + ' x' + i.qty + (i.cod ? '' : ' [PREPAID]')).join(', '),
+    name: b.name, ph: b.ph, a: b.a, z: inside ? 'Inside Dhaka' : 'Outside Dhaka', bk: b.bk, trx: b.trx, st: 'New'
   });
   res.json({ ok: 1, id: o._id });
 }));
