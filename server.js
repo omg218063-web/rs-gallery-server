@@ -49,6 +49,7 @@ app.post('/api/orders', w(async (req, res) => {
     name: b.name, ph: b.ph, a: b.a, z: inside ? 'Inside Dhaka' : 'Outside Dhaka',
     bk: b.bk || '', trx: b.trx || '', cid: String(b.cid || ''), st: 'New'
   });
+  for (const i of items) await Product.updateOne({ _id: i.pid }, { $inc: { sold: i.qty } });
   res.json({ ok: 1, id: o._id });
 }));
 app.get('/api/my-orders', w(async (req, res) => {
