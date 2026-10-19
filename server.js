@@ -18,6 +18,10 @@ const auth = (req, res, next) => {
 const slim = p => ({ ...p, imgs: (p.imgs || []).slice(0, 1), ni: (p.imgs || []).length });
 
 app.get('/', (req, res) => res.send('RS Gallery API running'));
+
+// রেন্ডার সচল রাখার জন্য নতুন /ping রুট যোগ করা হলো
+app.get('/ping', (req, res) => res.status(200).send('Pong! Server is alive.'));
+
 app.get('/api/products', w(async (req, res) => res.json((await Product.find().sort({ createdAt: -1 }).lean()).map(slim))));
 app.get('/api/products/:id', w(async (req, res) => res.json(await Product.findById(req.params.id).lean())));
 app.get('/api/config', w(async (req, res) => res.json(await cfg())));
