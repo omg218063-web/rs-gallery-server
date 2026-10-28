@@ -16,6 +16,30 @@ const auth = (req, res, next) => {
   next();
 };
 
+// ---- RS Wallet এ ডিপোজিটের খবর পাঠানো ----
+async function sendToWallet(data, tries = 3) {
+  if (!process.env.WALLET_URL || !process.env.WALLET_KEY) return;
+  for (let i = 1; i <= tries; i++) {
+    try {
+      const r = await fetch(process.env.WALLET_URL + '/api/site/deposit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.WALLET_KEY },
+        body: JSON.stringify(data)
+      });
+      const out = await r.json().catch(() => ({}));
+      if (r.ok && out.ok !== false) return out;
+      if (r.status >= 400 && r.status < 500) {
+        console.error('Wallet rejected:', r.status, out.error || '');
+        return;
+      }
+      throw new Error('Wallet error ' + r.status);
+    } catch (e) {
+      console.error('Wallet try ' + i + ':', e.message);
+      if (i < tries) await new Promise(ok => setTimeout(ok, 15000));
+    }
+  }
+}
+
 // ---- helpers ----
 const strip = p => { if (!p) return p; const { cost, code, ...r } = p; return r; };
 const imgUrl = (p, i) => '/api/img/' + p._id + '/' + i + '?v=' + new Date(p.updatedAt || 0).getTime();
@@ -105,6 +129,15 @@ app.post('/api/orders', w(async (req, res) => {
     prevBad: h.bad, prevGood: h.good, prevTotal: h.total, risky
   });
   for (const i of items) await Product.updateOne({ _id: i.pid }, { $inc: { sold: i.qty } });
+  // অগ্রিম ডেলিভারি চার্জ থাকলে RS Wallet এ পেন্ডিং হিসেবে পাঠাও (ব্যাকগ্রাউন্ডে, অর্ডার আটকাবে না)
+  if (adv > 0 && b.trx) {
+    sendToWallet({
+      trxId: String(b.trx).trim(),
+      amount: adv,
+      number: String(b.bk || ''),
+      orderRef: String(o._id)
+    }).catch(e => console.error('Wallet:', e.message));
+  }
   res.json({ ok: 1, id: o._id });
 }));
 app.get('/api/my-orders', w(async (req, res) => {
