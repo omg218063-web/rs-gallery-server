@@ -27,15 +27,18 @@ const listPipe = (hide) => [
 ];
 const BAD = ['Returned', 'Cancelled', 'Failed'];
 const normPh = s => { let d = String(s || '').replace(/\D/g, ''); if (d.startsWith('880')) d = d.slice(2); if (d.length === 10) d = '0' + d; return d.slice(-11); };
-const history = async (ph, cid) => {
-  const or = [], n = normPh(ph);
+const akey = a => String(a || '').toLowerCase().replace(/[^a-z0-9\u0980-\u09ff]/g, '').slice(0, 40);
+// a customer is matched by phone, device id OR address
+const history = async (ph, cid, addr) => {
+  const or = [], n = normPh(ph), ak = akey(addr);
   if (n.length === 11) or.push({ phn: n });
   if (String(cid || '').length >= 20) or.push({ cid: String(cid) });
+  if (ak.length >= 12) or.push({ akey: ak });
   if (!or.length) return { bad: 0, good: 0, total: 0 };
   const os = await Order.find({ $or: or }).select('st').lean();
   return { bad: os.filter(o => BAD.includes(o.st)).length, good: os.filter(o => o.st === 'Delivered').length, total: os.length };
 };
-const isRisky = (h, c) => { const t = +(c.riskBad ?? 2); return t > 0 && h.bad >= t; };
+const isRisky = (h, c) => { const t = +(c.riskBad ?? 1); return t > 0 && h.bad >= t; };
 
 app.get('/', (req, res) => res.send('RS Gallery API running'));
 
@@ -68,7 +71,7 @@ app.post('/api/visit', w(async (req, res) => {
   res.json({ ok: 1 });
 }));
 app.get('/api/risk', w(async (req, res) => {
-  const c = await cfg(), h = await history(req.query.ph, req.query.cid);
+  const c = await cfg(), h = await history(req.query.ph, req.query.cid, req.query.addr);
   res.json({ risky: isRisky(h, c) });
 }));
 
@@ -90,14 +93,14 @@ app.post('/api/orders', w(async (req, res) => {
   }
   if (!items.length) return res.status(404).json({ error: 'Products not found' });
   if (price < minO) return res.status(400).json({ error: 'Minimum order is ৳' + minO });
-  const h = await history(b.ph, b.cid), risky = isRisky(h, c);
+  const h = await history(b.ph, b.cid, b.a), risky = isRisky(h, c);
   const free = freeD > 0 && price >= freeD && !risky;
   const del = free ? 0 : base, adv = (charge || risky) ? del : 0;
   if (adv > 0 && (!b.bk || !b.trx)) return res.status(402).json({ error: 'Advance delivery charge required', risk: risky, adv });
   const o = await Order.create({
     items, price, profit, delivery: adv, adv, due: price,
     item: items.map(i => i.name + (i.size || i.color ? ' (' + [i.size, i.color].filter(Boolean).join('/') + ')' : '') + ' x' + i.qty).join(', '),
-    name: b.name, ph: b.ph, phn: normPh(b.ph), a: b.a, z: inside ? 'Inside Dhaka' : 'Outside Dhaka',
+    name: b.name, ph: b.ph, phn: normPh(b.ph), a: b.a, akey: akey(b.a), z: inside ? 'Inside Dhaka' : 'Outside Dhaka',
     bk: b.bk || '', trx: b.trx || '', cid: String(b.cid || ''), st: 'New',
     prevBad: h.bad, prevGood: h.good, prevTotal: h.total, risky
   });
