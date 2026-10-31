@@ -261,3 +261,55 @@ app.get('/api/assistant/summary', w(async (req, res) => {
     visitorsToday: visit ? visit.n : 0
   });
 }));
+// ---------- অ্যাসিস্ট্যান্টের জন্য: অর্ডারের বিস্তারিত (শুধু দেখা) ----------
+app.get('/api/assistant/orders', w(async (req, res) => {
+  const key = String(req.headers['x-assistant-key'] || '');
+  const expected = process.env.ASSISTANT_KEY || '';
+  if (!expected || !key || !assistantSame(key, expected)) {
+    return res.status(401).json({ ok: false, error: 'অনুমতি নেই' });
+  }
+  const base = 'https://' + req.get('host');
+  const start = new Date(day() + 'T00:00:00+06:00');
+
+  const list = await Order.find().sort({ createdAt: -1 }).limit(10).lean();
+  const latestOrders = list.map(o => ({
+    id: String(o._id).slice(-6).toUpperCase(),
+    name: o.name || '',
+    phone: o.ph || '',
+    address: o.a || '',
+    zone: o.z || '',
+    status: o.st || '',
+    total: o.price || 0,
+    advance: o.adv || 0,
+    advanceBkash: o.bk || '',
+    advanceTrx: o.trx || '',
+    risky: !!o.risky,
+    time: o.createdAt,
+    items: (o.items || []).map(i => ({
+      name: i.name || '',
+      qty: i.qty || 1,
+      size: i.size || '',
+      color: i.color || '',
+      amount: i.amt || 0,
+      image: i.pid ? base + '/api/img/' + i.pid + '/0' : ''
+    }))
+  }));
+
+  const todayList = await Order.find({ createdAt: { $gte: start } }).select('st').lean();
+  const activeOrders = await Order.countDocuments({
+    st: { $nin: ['Delivered', 'Returned', 'Cancelled', 'Failed'] }
+  });
+
+  const visit = await Visit.findById(day()).lean();
+  const refs = await Visit.find({ _id: /^r:/ }).lean();
+
+  res.json({
+    ok: true,
+    ordersToday: todayList.length,
+    newToday: todayList.filter(o => o.st === 'New').length,
+    activeOrders: activeOrders,
+    latestOrders: latestOrders,
+    visitorsToday: visit ? visit.n : 0,
+    trafficSources: refs.map(r => ({ source: r._id.slice(2), totalVisits: r.n })).sort((a, b) => b.totalVisits - a.totalVisits)
+  });
+}));
