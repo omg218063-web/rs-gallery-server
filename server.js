@@ -187,4 +187,77 @@ app.put('/api/admin/config', auth, w(async (req, res) => {
 mongoose.connect(MONGO_URI).then(() => {
   console.log('DB connected');
   app.listen(process.env.PORT || 3000, () => console.log('Server running'));
-}).catch(e => { console.error('DB error', e.message); process.exit(1); });
+}).catch(e => { console.error('DB error', e.message); process.exit(1); }); // ---------- অ্যাসিস্ট্যান্টের জন্য (শুধু দেখা, কিছু বদলায় না) ----------
+const assistantSame = (a, b) => {
+  const c = require('crypto');
+  const ha = c.createHash('sha256').update(String(a)).digest();
+  const hb = c.createHash('sha256').update(String(b)).digest();
+  return c.timingSafeEqual(ha, hb);
+};
+
+app.get('/api/assistant/summary', w(async (req, res) => {
+  const key = String(req.headers['x-assistant-key'] || '');
+  const expected = process.env.ASSISTANT_KEY || '';
+  if (!expected || !key || !assistantSame(key, expected)) {
+    return res.status(401).json({ ok: false, error: 'অনুমতি নেই' });
+  }
+  const start = new Date(day() + 'T00:00:00+06:00');
+
+  const productTotal = await Product.countDocuments();
+  const soldAgg = await Product.aggregate([
+    { $group: { _id: null, units: { $sum: { $ifNull: ['$sold', 0] } } } }
+  ]);
+  const topSelling = await Product.find().sort({ sold: -1 }).limit(5).select('n p sold -_id').lean();
+
+  const statusRows = await Order.aggregate([
+    { $group: { _id: '$st', count: { $sum: 1 }, amount: { $sum: { $ifNull: ['$price', 0] } } } }
+  ]);
+  const byStatus = {};
+  statusRows.forEach(r => { byStatus[r._id || 'Unknown'] = { count: r.count, amount: r.amount }; });
+
+  const totals = await Order.aggregate([
+    { $group: {
+      _id: null,
+      orders: { $sum: 1 },
+      sales: { $sum: { $ifNull: ['$price', 0] } },
+      advance: { $sum: { $ifNull: ['$adv', 0] } },
+      profit: { $sum: { $ifNull: ['$profit', 0] } }
+    } }
+  ]);
+  const t = totals[0] || { orders: 0, sales: 0, advance: 0, profit: 0 };
+
+  const todayAgg = await Order.aggregate([
+    { $match: { createdAt: { $gte: start } } },
+    { $group: { _id: null, count: { $sum: 1 }, sales: { $sum: { $ifNull: ['$price', 0] } } } }
+  ]);
+  const td = todayAgg[0] || { count: 0, sales: 0 };
+
+  const recent = await Order.find().sort({ createdAt: -1 }).limit(5)
+    .select('name item price st createdAt -_id').lean();
+
+  const custAgg = await Order.aggregate([
+    { $match: { phn: { $exists: true, $ne: '' } } },
+    { $group: { _id: '$phn', n: { $sum: 1 } } },
+    { $group: { _id: null, total: { $sum: 1 }, repeat: { $sum: { $cond: [{ $gte: ['$n', 2] }, 1, 0] } } } }
+  ]);
+  const cu = custAgg[0] || { total: 0, repeat: 0 };
+
+  const visit = await Visit.findById(day()).lean();
+
+  res.json({
+    ok: true,
+    date: day(),
+    products: { total: productTotal, unitsSold: soldAgg[0] ? soldAgg[0].units : 0, topSelling: topSelling },
+    orders: {
+      total: t.orders,
+      totalSales: t.sales,
+      totalAdvanceCharge: t.advance,
+      totalProfit: t.profit,
+      byStatus: byStatus,
+      today: { count: td.count, sales: td.sales },
+      recent: recent
+    },
+    customers: { uniqueByPhone: cu.total, repeatCustomers: cu.repeat },
+    visitorsToday: visit ? visit.n : 0
+  });
+}));
