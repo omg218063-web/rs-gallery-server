@@ -74,7 +74,7 @@ app.get('/api/risk', w(async (req, res) => {
   res.json({ risky: isRisky(h, c) });
 }));
 
-// ---------- AI customer support (Gemini) ----------
+// ---------- RS Customer Care (AI, Gemini) ----------
 const rate = new Map();
 const limited = ip => {
   const now = Date.now(), a = (rate.get(ip) || []).filter(t => now - t < 600000);
@@ -84,16 +84,16 @@ const limited = ip => {
 const bdHour = () => (new Date().getUTCHours() + 6) % 24;
 const toks = s => String(s || '').toLowerCase().split(/[^a-z0-9\u0980-\u09ff]+/).filter(x => x.length > 1);
 const clock = h => (h === 0 || h === 24) ? 'রাত ১২টা' : h < 12 ? 'সকাল ' + h + 'টা' : h === 12 ? 'দুপুর ১২টা' : h < 16 ? 'দুপুর ' + (h - 12) + 'টা' : h < 18 ? 'বিকাল ' + (h - 12) + 'টা' : 'রাত ' + (h - 12) + 'টা';
-const FALL = 'দুঃখিত, এই মুহূর্তে উত্তর দিতে পারছি না। অনুগ্রহ করে WhatsApp-এ মেসেজ দিন।';
+const BUSY = 'এই মুহূর্তে আমাদের কাস্টমার কেয়ারে অনেক চাপ ও অপেক্ষমাণ মেসেজ আছে, তাই উত্তর দিতে দেরি হচ্ছে। অনুগ্রহ করে সরাসরি WhatsApp-এ মেসেজ দিন, আমরা দ্রুত উত্তর দেব। 🙏';
 
 app.post('/api/chat', w(async (req, res) => {
   const c = await cfg(), b = req.body || {};
-  if (c.chatOn === '0') return res.json({ closed: true, reply: 'AI সহায়তা এখন বন্ধ আছে। অনুগ্রহ করে WhatsApp-এ মেসেজ দিন।' });
+  if (c.chatOn === '0') return res.json({ closed: true, reply: 'RS কাস্টমার কেয়ার এখন বন্ধ আছে। অনুগ্রহ করে WhatsApp-এ মেসেজ দিন।' });
   const f = +(c.chatFrom ?? 7), t = +(c.chatTo ?? 24), h = bdHour();
-  if (!(h >= f && h < t)) return res.json({ closed: true, reply: `আমাদের AI সহায়তা প্রতিদিন ${clock(f)} থেকে ${clock(t)} পর্যন্ত খোলা থাকে। এখন বন্ধ আছে। অনুগ্রহ করে সময়ের মধ্যে আবার লিখুন অথবা WhatsApp-এ মেসেজ দিন।` });
-  if (limited(req.ip)) return res.status(429).json({ error: 'অনেক বেশি মেসেজ হয়ে গেছে। কয়েক মিনিট পরে আবার চেষ্টা করুন।' });
+  if (!(h >= f && h < t)) return res.json({ closed: true, reply: `আমাদের RS কাস্টমার কেয়ার প্রতিদিন ${clock(f)} থেকে ${clock(t)} পর্যন্ত খোলা থাকে। এখন বন্ধ আছে। অনুগ্রহ করে সময়ের মধ্যে আবার লিখুন অথবা WhatsApp-এ মেসেজ দিন।` });
+  if (limited(req.ip)) return res.json({ busy: true, reply: BUSY });
   const key = process.env.GEMINI_API_KEY, model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-  if (!key) return res.json({ reply: 'AI সহায়তা এখনো চালু হয়নি। অনুগ্রহ করে WhatsApp-এ মেসেজ দিন।' });
+  if (!key) return res.json({ busy: true, reply: BUSY });
 
   let msgs = (Array.isArray(b.msgs) ? b.msgs : []).slice(-10)
     .map(m => ({ role: m.r === 'u' ? 'user' : 'model', text: String(m.t || '').slice(0, 500) })).filter(m => m.text);
@@ -118,7 +118,7 @@ app.post('/api/chat', w(async (req, res) => {
   }
   const line = p => `id=${p._id} | ${p.n} | ৳${p.p}${p.o > p.p ? ' (আগের দাম ৳' + p.o + ')' : ''} | ${cn(p.c, p.s)} | ${p.dm === 'cod' ? 'ক্যাশ অন ডেলিভারি, ডেলিভারি চার্জ নেই' : 'ডেলিভারি চার্জ অগ্রিম দিতে হয়'} | রং: ${(p.colors || []).join(', ') || '-'} | সাইজ: ${(p.sizes || []).join(', ') || '-'} | রেটিং: ${p.r || '-'} | বিবরণ: ${String(p.d || '').replace(/\s+/g, ' ').slice(0, 300)}`;
 
-  const sys = `তুমি "RS Gallery Shop"-এর অনলাইন কাস্টমার সাপোর্ট সহকারী। উত্তর বাংলায় দাও (কাস্টমার ইংরেজিতে লিখলে ইংরেজিতে)। ছোট, বন্ধুত্বপূর্ণ ও পরিষ্কার উত্তর দাও (সর্বোচ্চ ৫-৬ লাইন)।
+  const sys = `তুমি "RS Gallery Shop"-এর "RS কাস্টমার কেয়ার" অনলাইন সহকারী। তুমি একটি AI সহকারী, কেউ জিজ্ঞাসা করলে সৎভাবে সেটা বলবে। উত্তর বাংলায় দাও (কাস্টমার ইংরেজিতে লিখলে ইংরেজিতে)। ছোট, বন্ধুত্বপূর্ণ ও পরিষ্কার উত্তর দাও (সর্বোচ্চ ৫-৬ লাইন)।
 দোকানের তথ্য:
 - পণ্য: ফ্যাশন, বিউটি, বাচ্চাদের জিনিস, গ্যাজেট ও খাবার। সারা বাংলাদেশে ডেলিভারি।
 - ডেলিভারি চার্জ: ঢাকার ভেতরে ৳${c.in || 60}, ঢাকার বাইরে ৳${c.out || 120}। ৳${c.freeDel ?? 3000} বা তার বেশি কিনলে ফ্রি ডেলিভারি (০ হলে ফ্রি ডেলিভারি নেই)। ন্যূনতম অর্ডার ৳${c.minOrder ?? 300}।
@@ -145,10 +145,10 @@ ${list.map(line).join('\n')}`;
       body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents, generationConfig: { temperature: 0.4, maxOutputTokens: 1024 } })
     });
     const j = await r.json();
-    if (!r.ok) { console.error('Gemini error', r.status, JSON.stringify(j).slice(0, 300)); return res.json({ reply: FALL }); }
+    if (!r.ok) { console.error('Gemini error', r.status, JSON.stringify(j).slice(0, 300)); return res.json({ busy: true, reply: BUSY }); }
     text = ((j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || []).map(p => p.text || '').join('').trim();
-  } catch (e) { console.error('Gemini fetch failed', e.message); return res.json({ reply: FALL }); }
-  if (!text) return res.json({ reply: FALL });
+  } catch (e) { console.error('Gemini fetch failed', e.message); return res.json({ busy: true, reply: BUSY }); }
+  if (!text) return res.json({ busy: true, reply: BUSY });
 
   const ok = new Set(all.map(p => String(p._id)));
   const products = [...new Set([...text.matchAll(/\[\[P:([a-f0-9]{24})\]\]/g)].map(m => m[1]).filter(id => ok.has(id)))].slice(0, 3);
